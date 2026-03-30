@@ -712,7 +712,12 @@ async function toggleAction(itemId, actionIdx, el) {
   item.actionsDone[actionIdx] = !item.actionsDone[actionIdx];
   const isDone = item.actionsDone[actionIdx];
 
-  // Visual update immediately
+  // Update actionsData in sync
+  if (item.actionsData && item.actionsData[actionIdx]) {
+    item.actionsData[actionIdx].concluida = isDone;
+  }
+
+  // Visual update immediately (no re-render needed)
   el.classList.toggle('checked', isDone);
   const textEl = el.nextElementSibling;
   if (textEl) textEl.classList.toggle('done', isDone);
@@ -722,7 +727,7 @@ async function toggleAction(itemId, actionIdx, el) {
   const done  = item.actionsDone.filter(Boolean).length;
   item.progress = total > 0 ? Math.round((done / total) * 100) : 0;
 
-  // Update progress bar in row without full re-render
+  // Update progress bar without full re-render
   const block = document.getElementById(`row-${itemId}`)?.closest('.item-block');
   if (block) {
     const pc = progClass(item.progress);
@@ -735,19 +740,32 @@ async function toggleAction(itemId, actionIdx, el) {
   }
   updateSummary();
 
-  // Persist to Supabase: update concluida on the matching list_item row
-  const { data: liRows } = await supa
-    .from('lista_itens')
-    .select('id, ordem')
-    .eq('iniciativa_id', itemId)
-    .eq('tipo', 'action')
-    .order('ordem', { ascending: true });
-
-  if (liRows && liRows[actionIdx]) {
-    await supa.from('lista_itens')
+  // ── Persist to Supabase using stored DB id ──
+  const dbId = item.actionsData?.[actionIdx]?.dbId;
+  if (dbId) {
+    // Update by known DB id — fast and reliable
+    const { error } = await supa.from('lista_itens')
       .update({ concluida: isDone })
-      .eq('id', liRows[actionIdx].id);
-    // Supabase trigger will recalc progresso automatically
+      .eq('id', dbId);
+    if (error) { showToast('Erro ao salvar ✗', false); console.error(error); }
+    // DB trigger recalcula progresso automaticamente
+  } else {
+    // Fallback: busca por ordem caso actionsData ainda não tenha dbId (item novo)
+    const { data: liRows, error } = await supa
+      .from('lista_itens')
+      .select('id')
+      .eq('iniciativa_id', itemId)
+      .eq('tipo', 'action')
+      .order('ordem', { ascending: true });
+    if (!error && liRows && liRows[actionIdx]) {
+      // Store dbId for future use
+      if (!item.actionsData) item.actionsData = [];
+      if (!item.actionsData[actionIdx]) item.actionsData[actionIdx] = {};
+      item.actionsData[actionIdx].dbId = liRows[actionIdx].id;
+      await supa.from('lista_itens')
+        .update({ concluida: isDone })
+        .eq('id', liRows[actionIdx].id);
+    }
   }
 }
 
@@ -827,14 +845,24 @@ async function upsertItem(item, ordem) {
   item.id = realId;
   item._persisted = true;
 
-  // delete old list items and re-insert
+  // delete old list items and re-insert, preserving concluida state
   await supa.from('lista_itens').delete().eq('iniciativa_id', realId);
   const listRows = [
-    ...item.actions.map((t,i)=>({iniciativa_id:realId, tipo:'action', texto:t, ordem:i})),
-    ...item.kpis.map((t,i)=>({iniciativa_id:realId, tipo:'kpi',    texto:t, ordem:i})),
-    ...item.risks.map((t,i)=>({iniciativa_id:realId, tipo:'risk',   texto:t, ordem:i})),
+    ...item.actions.map((t,i)=>({
+      iniciativa_id: realId, tipo:'action', texto:t, ordem:i,
+      concluida: item.actionsDone?.[i] ?? item.actionsData?.[i]?.concluida ?? false
+    })),
+    ...item.kpis.map((t,i)=>({iniciativa_id:realId, tipo:'kpi',  texto:t, ordem:i})),
+    ...item.risks.map((t,i)=>({iniciativa_id:realId, tipo:'risk', texto:t, ordem:i})),
   ];
-  if (listRows.length) await supa.from('lista_itens').insert(listRows);
+  if (listRows.length) {
+    const { data: inserted } = await supa.from('lista_itens').insert(listRows).select();
+    // Refresh actionsData with new DB ids
+    if (inserted) {
+      const newActionRows = inserted.filter(r=>r.tipo==='action').sort((a,b)=>a.ordem-b.ordem);
+      item.actionsData = newActionRows.map((r,i)=>({ dbId:r.id, texto:r.texto, concluida:r.concluida }));
+    }
+  }
 }
 
 async function deleteItemFromSupabase(id) {
