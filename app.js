@@ -582,8 +582,6 @@ window.addEventListener('DOMContentLoaded', async () => {
   // Initialize Supabase client here — ensures SDK is loaded first
   supa = supabase.createClient(SUPA_URL, SUPA_KEY);
 
-  document.getElementById('logoImg').src = window._LOGO_SRC || '';
-
   document.getElementById('editToggle').addEventListener('click', async () => {
     if (editMode) {
       document.getElementById('editToggle').disabled = true;
