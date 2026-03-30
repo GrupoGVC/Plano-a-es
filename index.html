@@ -144,6 +144,12 @@
   .di-action { background: var(--blue-400); }
   .di-kpi    { background: var(--gvc); }
   .di-risk   { background: var(--coral-400); }
+  /* ACTION CHECKBOX */
+  .action-check { width: 16px; height: 16px; border-radius: 4px; border: 1.5px solid var(--border-strong); background: white; cursor: pointer; flex-shrink: 0; display: flex; align-items: center; justify-content: center; transition: all 0.15s; margin-top: 2px; }
+  .action-check:hover { border-color: var(--gvc); }
+  .action-check.checked { background: var(--gvc); border-color: var(--gvc); }
+  .action-check.checked::after { content: ""; display: block; width: 4px; height: 7px; border: 2px solid white; border-top: none; border-left: none; transform: rotate(45deg) translateY(-1px); }
+  .action-text.done { text-decoration: line-through; color: var(--text-muted); }
 
   /* EDIT MODE */
   [contenteditable="true"] { outline: none; border-radius: 4px; transition: background 0.12s; cursor: text; }
@@ -345,15 +351,22 @@ function statusLabel(s) {
 }
 function ce() { return editMode ? 'contenteditable="true"' : 'contenteditable="false"'; }
 
-function buildListItems(arr,cls) {
-  return arr.map(t=>`
-    <li draggable="${editMode}" 
+function buildListItems(arr, cls, itemId, section, doneArr) {
+  return arr.map((t,i) => {
+    const isDone = section === 'actions' && doneArr && doneArr[i];
+    const isAction = section === 'actions';
+    return `
+    <li draggable="${editMode}"
         ondragstart="dragStart(event)" ondragover="dragOver(event)" ondragleave="dragLeave(event)" ondrop="dropItem(event)" ondragend="dragEnd(event)">
-      ${editMode?`<span class="drag-handle" title="Arrastar para reordenar">⠿</span>`:''}
-      <span class="di ${cls}"></span>
-      <span ${ce()} data-field="text">${t}</span>
-      ${editMode?`<button class="remove-btn" onclick="removeListItem(this)">×</button>`:''}
-    </li>`).join('');
+      ${editMode ? `<span class="drag-handle" title="Arrastar para reordenar">⠿</span>` : ''}
+      ${isAction
+        ? `<div class="action-check ${isDone?'checked':''}" onclick="toggleAction(${itemId},${i},this)" title="Marcar como concluída"></div>`
+        : `<span class="di ${cls}"></span>`
+      }
+      <span ${ce()} data-field="text" class="${isAction && isDone ? 'action-text done' : 'action-text'}">${t}</span>
+      ${editMode ? `<button class="remove-btn" onclick="removeListItem(this)">×</button>` : ''}
+    </li>`;
+  }).join('');
 }
 
 function renderDetail(item) {
@@ -370,15 +383,15 @@ function renderDetail(item) {
       </div>
       <div class="detail-grid">
         <div><div class="detail-title">Ações</div>
-          <ul class="detail-list" data-item="${item.id}" data-section="actions">${buildListItems(item.actions,'di-action')}</ul>
+          <ul class="detail-list" data-item="${item.id}" data-section="actions">${buildListItems(item.actions,'di-action',item.id,'actions',item.actionsDone)}</ul>
           ${editMode?`<button class="btn" style="margin-top:8px;font-size:11px;padding:4px 10px" onclick="addListItem(${item.id},'actions')">+ Ação</button>`:''}
         </div>
         <div><div class="detail-title">KPIs de sucesso</div>
-          <ul class="detail-list" data-item="${item.id}" data-section="kpis">${buildListItems(item.kpis,'di-kpi')}</ul>
+          <ul class="detail-list" data-item="${item.id}" data-section="kpis">${buildListItems(item.kpis,'di-kpi',item.id,'kpis',null)}</ul>
           ${editMode?`<button class="btn" style="margin-top:8px;font-size:11px;padding:4px 10px" onclick="addListItem(${item.id},'kpis')">+ KPI</button>`:''}
         </div>
         <div><div class="detail-title">Riscos e dependências</div>
-          <ul class="detail-list" data-item="${item.id}" data-section="risks">${buildListItems(item.risks,'di-risk')}</ul>
+          <ul class="detail-list" data-item="${item.id}" data-section="risks">${buildListItems(item.risks,'di-risk',item.id,'risks',null)}</ul>
           ${editMode?`<button class="btn" style="margin-top:8px;font-size:11px;padding:4px 10px" onclick="addListItem(${item.id},'risks')">+ Risco</button>`:''}
         </div>
       </div>
@@ -416,7 +429,7 @@ function renderItems(filter) {
         <div class="prog-track" style="width:90%"><div class="prog-fill" style="width:${item.progress}%"></div></div>
         <span class="prog-pct">${item.progress}%</span>
       </div>
-      ${editMode?`<input type="range" class="prog-slider" min="0" max="100" step="5" value="${item.progress}" oninput="updateProgress(${item.id},this.value)" style="width:90%;margin-top:3px;">`:''}
+      ${editMode?`<div style="font-size:10px;color:var(--text-muted);margin-top:2px;text-align:center;">calculado pelas ações</div>`:''}
     </div>`;
 
     // Build 12 fortnight cells
@@ -689,6 +702,55 @@ function showToast(msg, ok=true) {
   setTimeout(()=>{ t.style.opacity='0'; t.style.transform='translateY(12px)'; }, 2500);
 }
 
+// ── TOGGLE ACTION ────────────────────────────────────
+async function toggleAction(itemId, actionIdx, el) {
+  const item = items.find(i => i.id === itemId);
+  if (!item) return;
+
+  // Toggle local state
+  if (!item.actionsDone) item.actionsDone = new Array(item.actions.length).fill(false);
+  item.actionsDone[actionIdx] = !item.actionsDone[actionIdx];
+  const isDone = item.actionsDone[actionIdx];
+
+  // Visual update immediately
+  el.classList.toggle('checked', isDone);
+  const textEl = el.nextElementSibling;
+  if (textEl) textEl.classList.toggle('done', isDone);
+
+  // Recalculate progress locally
+  const total = item.actions.length;
+  const done  = item.actionsDone.filter(Boolean).length;
+  item.progress = total > 0 ? Math.round((done / total) * 100) : 0;
+
+  // Update progress bar in row without full re-render
+  const block = document.getElementById(`row-${itemId}`)?.closest('.item-block');
+  if (block) {
+    const pc = progClass(item.progress);
+    const pd = block.querySelector('.item-prog');
+    if (pd) {
+      pd.querySelector('.prog-track').parentElement.className = pc;
+      pd.querySelector('.prog-fill').style.width = item.progress + '%';
+      pd.querySelector('.prog-pct').textContent = item.progress + '%';
+    }
+  }
+  updateSummary();
+
+  // Persist to Supabase: update concluida on the matching list_item row
+  const { data: liRows } = await supa
+    .from('lista_itens')
+    .select('id, ordem')
+    .eq('iniciativa_id', itemId)
+    .eq('tipo', 'action')
+    .order('ordem', { ascending: true });
+
+  if (liRows && liRows[actionIdx]) {
+    await supa.from('lista_itens')
+      .update({ concluida: isDone })
+      .eq('id', liRows[actionIdx].id);
+    // Supabase trigger will recalc progresso automatically
+  }
+}
+
 async function loadFromSupabase() {
   showToast('Carregando dados…');
   const { data: rows, error } = await supa
@@ -705,19 +767,21 @@ async function loadFromSupabase() {
 
   items = rows.map(r => {
     const listItems = r.lista_itens || [];
+    const actionRows = listItems.filter(i=>i.tipo==='action').sort((a,b)=>a.ordem-b.ordem);
     return {
-      id:        r.id,
-      name:      r.nome,
-      resp:      r.responsavel,
-      category:  r.categoria,
-      status:    r.status,
-      color:     r.cor,
-      start:     r.inicio,
-      end:       r.fim,
-      progress:  r.progresso,
-      actions:   listItems.filter(i=>i.tipo==='action').sort((a,b)=>a.ordem-b.ordem).map(i=>i.texto),
-      kpis:      listItems.filter(i=>i.tipo==='kpi').sort((a,b)=>a.ordem-b.ordem).map(i=>i.texto),
-      risks:     listItems.filter(i=>i.tipo==='risk').sort((a,b)=>a.ordem-b.ordem).map(i=>i.texto),
+      id:          r.id,
+      name:        r.nome,
+      resp:        r.responsavel,
+      category:    r.categoria,
+      status:      r.status,
+      color:       r.cor,
+      start:       r.inicio,
+      end:         r.fim,
+      progress:    r.progresso,
+      actions:     actionRows.map(i=>i.texto),
+      actionsDone: actionRows.map(i=>!!i.concluida),
+      kpis:        listItems.filter(i=>i.tipo==='kpi').sort((a,b)=>a.ordem-b.ordem).map(i=>i.texto),
+      risks:       listItems.filter(i=>i.tipo==='risk').sort((a,b)=>a.ordem-b.ordem).map(i=>i.texto),
     };
   });
   nextId = Math.max(...items.map(i=>i.id)) + 1;
