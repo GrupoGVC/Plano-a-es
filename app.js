@@ -369,11 +369,11 @@ function updateColor(id,val){
 }
 // ── ADD ITEM TO DB ───────────────────────────────────
 async function addItemToDb(item, ordem) {
-  const { data, error } = await api('insert-iniciativa', {
+  const { data, error } = await supa.from('iniciativas').insert({
     nome: item.name, responsavel: item.resp, categoria: item.category,
     status: item.status, cor: item.color, inicio: item.start, fim: item.end,
     progresso: 0, ordem: ordem,
-  });
+  }).select().single();
   if (error || !data) { console.error('addItemToDb', error); return null; }
   const rows = [
     ...item.actions.map((t,j) => ({ iniciativa_id: data.id, tipo:'action', texto:t, ordem:j, concluida:false })),
@@ -381,7 +381,7 @@ async function addItemToDb(item, ordem) {
     ...item.risks.map((t,j)   => ({ iniciativa_id: data.id, tipo:'risk',   texto:t, ordem:j })),
   ];
   if (rows.length > 0) {
-    const { data: inserted } = await api('insert-itens', { rows });
+    const { data: inserted } = await supa.from('lista_itens').insert(rows).select();
     if (inserted) {
       const newActions = inserted.filter(r => r.tipo === 'action').sort((a,b) => a.ordem - b.ordem);
       item.actionsData = newActions.map(r => ({ dbId: r.id, texto: r.texto, concluida: false }));
@@ -419,19 +419,10 @@ function removeListItem(btn){
     setTimeout(()=>{document.getElementById(`detail-${id}`)?.classList.add('open');document.getElementById(`row-${id}`)?.classList.add('expanded');},10);}
 }
 
-// ── API CONFIG — Edge Function proxy (sem CORS) ──────
-const API = 'https://lqbmjmqrhcokimdtekyc.supabase.co/functions/v1/plano-api';
-
-async function api(action, body = null) {
-  const opts = {
-    method: body ? 'POST' : 'GET',
-    headers: { 'Content-Type': 'application/json' },
-  };
-  if (body) opts.body = JSON.stringify(body);
-  const res  = await fetch(`${API}?action=${action}`, opts);
-  const json = await res.json();
-  return json;
-}
+// ── SUPABASE CONFIG ─────────────────────────────────
+const SUPA_URL = 'https://lqbmjmqrhcokimdtekyc.supabase.co';
+const SUPA_KEY = 'sb_publishable_diRz85-oFD3S84v2uK_YkA_eS7Gu131';
+let supa; // initialized in DOMContentLoaded after SDK loads
 
 function showToast(msg, ok=true) {
   const t = document.getElementById('toast');
@@ -482,27 +473,37 @@ async function toggleAction(itemId, actionIdx, el) {
   // ── Persist to Supabase using stored DB id ──
   const dbId = item.actionsData?.[actionIdx]?.dbId;
   if (dbId) {
-    const { error } = await api('toggle-action', { dbId, concluida: isDone });
+    // Update by known DB id — fast and reliable
+    const { error } = await supa.from('lista_itens')
+      .update({ concluida: isDone })
+      .eq('id', dbId);
     if (error) { showToast('Erro ao salvar ✗', false); console.error(error); }
+    // DB trigger recalcula progresso automaticamente
   } else {
-    // Fallback: recarrega do banco para encontrar o dbId
-    const { data: rows } = await api('load');
-    const freshItem = rows?.find(r => r.id === itemId);
-    const actionRows = freshItem?.lista_itens?.filter(r=>r.tipo==='action').sort((a,b)=>a.ordem-b.ordem);
-    if (actionRows?.[actionIdx]) {
+    // Fallback: busca por ordem caso actionsData ainda não tenha dbId (item novo)
+    const { data: liRows, error } = await supa
+      .from('lista_itens')
+      .select('id')
+      .eq('iniciativa_id', itemId)
+      .eq('tipo', 'action')
+      .order('ordem', { ascending: true });
+    if (!error && liRows && liRows[actionIdx]) {
+      // Store dbId for future use
       if (!item.actionsData) item.actionsData = [];
       if (!item.actionsData[actionIdx]) item.actionsData[actionIdx] = {};
-      item.actionsData[actionIdx].dbId = actionRows[actionIdx].id;
-      await api('toggle-action', { dbId: actionRows[actionIdx].id, concluida: isDone });
+      item.actionsData[actionIdx].dbId = liRows[actionIdx].id;
+      await supa.from('lista_itens')
+        .update({ concluida: isDone })
+        .eq('id', liRows[actionIdx].id);
     }
   }
 }
 
 async function loadFromSupabase() {
   showToast('Carregando dados…');
-  const { data: rows, error } = await api('load').then(r => ({data: r.data, error: r.error})).catch(e => ({error:{message:e.message}}));
-  if (false) { // placeholder to keep structure
-    const _unused = null
+  const { data: rows, error } = await supa
+    .from('iniciativas')
+    .select('*, lista_itens(*)')
     .order('ordem', { ascending: true });
 
   if (error) { showToast('Erro ao carregar ✗', false); return; }
@@ -542,8 +543,7 @@ async function saveEdits() {
   showToast('Salvando…');
   for (let i = 0; i < items.length; i++) {
     const item = items[i];
-    const { error: e1 } = await api('update-iniciativa', {
-      id:          item.id,
+    const { error: e1 } = await supa.from('iniciativas').update({
       nome:        item.name,
       responsavel: item.resp,
       categoria:   item.category,
@@ -553,10 +553,10 @@ async function saveEdits() {
       fim:         item.end,
       progresso:   item.progress,
       ordem:       i,
-    });
+    }).eq('id', item.id);
     if (e1) { console.error('save iniciativa', e1); continue; }
 
-    await api('delete-itens', { iniciativa_id: item.id });
+    await supa.from('lista_itens').delete().eq('iniciativa_id', item.id);
     const rows = [
       ...item.actions.map((t, j) => ({
         iniciativa_id: item.id, tipo: 'action', texto: t, ordem: j,
@@ -566,7 +566,7 @@ async function saveEdits() {
       ...item.risks.map((t, j) => ({ iniciativa_id: item.id, tipo: 'risk', texto: t, ordem: j })),
     ];
     if (rows.length > 0) {
-      const { data: inserted, error: e2 } = await api('insert-itens', { rows });
+      const { data: inserted, error: e2 } = await supa.from('lista_itens').insert(rows).select();
       if (e2) { console.error('save lista_itens', e2); continue; }
       if (inserted) {
         const newActions = inserted.filter(r => r.tipo === 'action').sort((a, b) => a.ordem - b.ordem);
@@ -579,6 +579,9 @@ async function saveEdits() {
 }
 
 window.addEventListener('DOMContentLoaded', async () => {
+  // Initialize Supabase client here — ensures SDK is loaded first
+  supa = supabase.createClient(SUPA_URL, SUPA_KEY);
+
   document.getElementById('editToggle').addEventListener('click', async () => {
     if (editMode) {
       document.getElementById('editToggle').disabled = true;
@@ -596,7 +599,12 @@ window.addEventListener('DOMContentLoaded', async () => {
 
 async function loadVersion() {
   try {
-    const { data, error } = await api('load-version');
+    const { data, error } = await supa
+      .from('versoes')
+      .select('versao, descricao, created_at')
+      .order('id', { ascending: false })
+      .limit(1)
+      .single();
     if (data && !error) {
       const el = document.getElementById('footerVersion');
       const date = new Date(data.created_at).toLocaleDateString('pt-BR');
