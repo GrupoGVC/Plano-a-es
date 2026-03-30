@@ -201,7 +201,7 @@
     </div>
     <div class="header-actions">
       <div class="edit-hint" id="editHint">✎ Clique em qualquer texto para editar</div>
-      <button class="btn" id="editToggle" onclick="toggleEditMode()">✎ Editar</button>
+      <button class="btn" id="editToggle">✎ Editar</button>
       <button class="btn primary" onclick="window.print()">↓ PDF</button>
     </div>
   </div>
@@ -839,12 +839,59 @@ async function loadFromSupabase() {
 }
 
 
-window.addEventListener('DOMContentLoaded', async ()=>{
-  document.getElementById('logoImg').src = window._LOGO_SRC||'';
-  document.getElementById('editToggle').onclick = async () => {
-    if (editMode) { await saveEdits(); }
+// ── SAVE EDITS ───────────────────────────────────────
+async function saveEdits() {
+  showToast('Salvando…');
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    const { error: e1 } = await supa.from('iniciativas').update({
+      nome:        item.name,
+      responsavel: item.resp,
+      categoria:   item.category,
+      status:      item.status,
+      cor:         item.color,
+      inicio:      item.start,
+      fim:         item.end,
+      progresso:   item.progress,
+      ordem:       i,
+    }).eq('id', item.id);
+    if (e1) { console.error('save iniciativa', e1); continue; }
+
+    await supa.from('lista_itens').delete().eq('iniciativa_id', item.id);
+    const rows = [
+      ...item.actions.map((t, j) => ({
+        iniciativa_id: item.id, tipo: 'action', texto: t, ordem: j,
+        concluida: item.actionsData?.[j]?.concluida ?? item.actionsDone?.[j] ?? false,
+      })),
+      ...item.kpis.map((t, j)  => ({ iniciativa_id: item.id, tipo: 'kpi',  texto: t, ordem: j })),
+      ...item.risks.map((t, j) => ({ iniciativa_id: item.id, tipo: 'risk', texto: t, ordem: j })),
+    ];
+    if (rows.length > 0) {
+      const { data: inserted, error: e2 } = await supa.from('lista_itens').insert(rows).select();
+      if (e2) { console.error('save lista_itens', e2); continue; }
+      if (inserted) {
+        const newActions = inserted.filter(r => r.tipo === 'action').sort((a, b) => a.ordem - b.ordem);
+        item.actionsData = newActions.map(r => ({ dbId: r.id, texto: r.texto, concluida: r.concluida }));
+        item.actionsDone = item.actionsData.map(a => a.concluida);
+      }
+    }
+  }
+  showToast('Salvo ✓');
+}
+
+window.addEventListener('DOMContentLoaded', async () => {
+  document.getElementById('logoImg').src = window._LOGO_SRC || '';
+
+  document.getElementById('editToggle').addEventListener('click', async () => {
+    if (editMode) {
+      document.getElementById('editToggle').disabled = true;
+      document.getElementById('editToggle').textContent = '⏳ Salvando…';
+      await saveEdits();
+      document.getElementById('editToggle').disabled = false;
+    }
     toggleEditMode();
-  };
+  });
+
   renderItems('all');
   await loadFromSupabase();
 });
