@@ -283,44 +283,7 @@ const STATUS_OPTIONS = [
 ];
 
 // start/end in fortnight slots (1-12)
-let items = [
-  {id:1, name:"Funis de venda", resp:"Gestor Comercial", category:"ploomes", status:"progress", color:"blue", start:1, end:4, progress:35,
-    actions:["Mapear etapas atuais do processo de vendas","Definir critérios de avanço entre fases","Configurar funis no Ploomes","Treinar equipe comercial nos novos fluxos","Validar com gerência e ajustar"],
-    kpis:["Taxa de conversão por etapa ≥ benchmark","100% dos leads cadastrados no funil","Redução de 20% no ciclo de vendas"],
-    risks:["Resistência da equipe à mudança de processo","Dados históricos sem padrão para migração","Funil genérico não refletir realidade do negócio"]},
-  {id:2, name:"Price no Ploomes", resp:"Gerente Comercial / TI", category:"ploomes", status:"not-started", color:"blue", start:3, end:6, progress:0,
-    actions:["Levantar tabelas de preços e regras comerciais","Estruturar CPQ dentro do Ploomes","Configurar descontos e aprovações","Testar cenários com time de vendas","Publicar e homologar com diretoria"],
-    kpis:["Zero erros de precificação em propostas","Tempo de geração de proposta < 10 min","Margem média mantida ou melhorada"],
-    risks:["Regras de preço complexas ou com exceções não mapeadas","Dependência de aprovação da diretoria para publicar tabelas"]},
-  {id:3, name:"API com Clicksign", resp:"TI / Jurídico", category:"infra", status:"not-started", color:"teal", start:3, end:8, progress:0,
-    actions:["Definir fluxo de assinatura digital por tipo de contrato","Contratar e configurar conta Clicksign","Desenvolver integração via API REST","Homologar ambiente de testes","Deploy em produção e treinamento dos usuários"],
-    kpis:["100% dos contratos assinados digitalmente","Redução de 3 dias no tempo de fechamento","Zero contratos físicos pendentes após go-live"],
-    risks:["Validade jurídica em alguns tipos de contrato","Instabilidade de API em integrações futuras","Curva de aprendizado do time jurídico"]},
-  {id:4, name:"Servidor virtual", resp:"TI", category:"infra", status:"progress", color:"teal", start:1, end:4, progress:60,
-    actions:["Definir especificações técnicas (CPU, RAM, disco)","Escolher provedor de cloud (AWS/Azure/GCP)","Provisionar e configurar ambiente","Configurar segurança, backup e monitoramento","Documentar arquitetura e acessos"],
-    kpis:["Uptime ≥ 99,5%","Backup automatizado diário configurado","Tempo de resposta < 200ms para aplicações hospedadas"],
-    risks:["Custo acima do orçamento aprovado","Falta de profissional técnico para configuração","Dependência de outros sistemas durante migração"]},
-  {id:5, name:"Dashboards comerciais", resp:"BI / Comercial", category:"infra", status:"not-started", color:"teal", start:5, end:8, progress:0,
-    actions:["Levantar métricas prioritárias com time comercial","Conectar fontes de dados (Ploomes, ERP, DRC)","Desenvolver dashboards no servidor virtual","Validar com gestores e diretoria","Publicar e treinar usuários finais"],
-    kpis:["Dashboards atualizado em tempo real ou D-1","Adoção por ≥ 80% do time comercial","Redução de relatórios manuais em 70%"],
-    risks:["Dados inconsistentes entre sistemas","Falta de governança de dados definida","Custo de ferramentas de BI não previsto"]},
-  {id:6, name:"Sistema DRC", resp:"TI / Operações", category:"ia", status:"not-started", color:"coral", start:5, end:10, progress:0,
-    actions:["Mapear processos que serão gerenciados pelo DRC","Definir arquitetura do sistema","Desenvolver módulos core do sistema","Testes integrados com equipe de operações","Go-live com acompanhamento presencial"],
-    kpis:["Cobertura de 100% dos processos mapeados","Redução de retrabalho operacional em 30%","Tempo médio de resposta do sistema < 2s"],
-    risks:["Escopo mal definido gerando retrabalho de desenvolvimento","Resistência da operação em adotar novo sistema","Integração com sistemas legados complexa"]},
-  {id:7, name:"API com sistema DRC", resp:"TI", category:"ia", status:"not-started", color:"coral", start:7, end:10, progress:0,
-    actions:["Definir endpoints e contratos de API","Desenvolver camada de integração","Homologar comunicação bidirecional","Testes de carga e performance","Documentar API para manutenção futura"],
-    kpis:["Latência de integração < 500ms","Zero perda de dados em transações","Disponibilidade da API ≥ 99%"],
-    risks:["Sistema DRC ainda em desenvolvimento (dependência)","Mudanças de escopo impactando os contratos de API"]},
-  {id:8, name:"Agentes de IA — Claudete 2.0", resp:"TI / Diretoria", category:"ia", status:"not-started", color:"purple", start:7, end:12, progress:0,
-    actions:["Definir casos de uso prioritários para os agentes","Escolher plataforma e modelo de IA","Desenvolver e treinar os agentes","Fase piloto com grupo restrito de usuários","Expansão gradual e monitoramento contínuo"],
-    kpis:["Redução de 40% em tarefas operacionais repetitivas","NPS de adoção dos agentes ≥ 7","ROI positivo medido em 90 dias após go-live"],
-    risks:["Qualidade de resposta abaixo do esperado em casos específicos","Resistência cultural à automação por IA","Custo de tokens/API acima do previsto","Dados sensíveis expostos sem controle de acesso adequado"]},
-  {id:9, name:"Comunicação Comercial × Operação", resp:"Gestores de Área", category:"ia", status:"not-started", color:"amber", start:9, end:12, progress:0,
-    actions:["Mapear pontos de falha na comunicação atual","Definir ferramenta e fluxo de comunicação oficial","Integrar com Ploomes e sistema DRC","Criar SLAs de resposta entre áreas","Implantar e monitorar adoção por 30 dias"],
-    kpis:["Redução de 50% em retrabalhos por falha de comunicação","SLA de resposta entre áreas < 4h","Satisfação interna ≥ 8/10 após 30 dias"],
-    risks:["Falta de engajamento da liderança de operações","Ferramenta escolhida não integrar bem com sistemas existentes","Cultura de silos entre áreas resistente a mudança"]}
-];
+let items = [];  // loaded from Supabase on DOMContentLoaded
 
 let nextId = 10, editMode = false, activeFilter = 'all';
 
