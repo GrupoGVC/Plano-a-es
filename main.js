@@ -597,6 +597,3 @@ async function loadVersion() {
     console.warn('Não foi possível carregar versão do banco:', e.message);
   }
 }
-</script>
-
-// cache-bust: 1774897145
