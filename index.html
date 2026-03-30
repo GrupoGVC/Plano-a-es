@@ -658,10 +658,9 @@ async function addItemToDb(item, ordem) {
 
 async function removeItem(id){
   if(!confirm('Remover esta iniciativa?'))return;
-  items = items.filter(i => i.id !== id);
+  items=items.filter(i=>i.id!==id);
   renderItems(activeFilter);
-  // Soft delete — marca como inativo, nunca apaga do banco
-  await supa.from('iniciativas').update({ ativo: false }).eq('id', id);
+  await deleteItemFromSupabase(id);
   showToast('Iniciativa removida ✓');
 }
 function addNewItem(){
@@ -675,24 +674,13 @@ function addListItem(itemId,section){
   renderItems(activeFilter);
   setTimeout(()=>{document.getElementById(`detail-${itemId}`)?.classList.add('open');document.getElementById(`row-${itemId}`)?.classList.add('expanded');},10);
 }
-async function removeListItem(btn){
+function removeListItem(btn){
   const li=btn.closest('li'),ul=btn.closest('ul');
   const id=parseInt(ul.dataset.item),section=ul.dataset.section;
   const idx=Array.from(ul.children).indexOf(li);
   const it=items.find(i=>i.id===id);
-  if(!it||it[section].length<=1)return;
-
-  // Get the dbId before splicing
-  const dataKey = section==='actions'?'actionsData':section==='kpis'?'kpisData':'risksData';
-  const dbId = it[dataKey]?.[idx]?.dbId;
-
-  it[section].splice(idx,1);
-  if(it[dataKey]) it[dataKey].splice(idx,1);
-  renderItems(activeFilter);
-  setTimeout(()=>{document.getElementById(`detail-${id}`)?.classList.add('open');document.getElementById(`row-${id}`)?.classList.add('expanded');},10);
-
-  // Soft delete in DB
-  if(dbId) await supa.from('lista_itens').update({ ativo: false }).eq('id', dbId);
+  if(it&&it[section].length>1){it[section].splice(idx,1);renderItems(activeFilter);
+    setTimeout(()=>{document.getElementById(`detail-${id}`)?.classList.add('open');document.getElementById(`row-${id}`)?.classList.add('expanded');},10);}
 }
 
 // ── SUPABASE CONFIG ─────────────────────────────────
@@ -780,7 +768,6 @@ async function loadFromSupabase() {
   const { data: rows, error } = await supa
     .from('iniciativas')
     .select('*, lista_itens(*)')
-    .eq('ativo', true)
     .order('ordem', { ascending: true });
 
   if (error) { showToast('Erro ao carregar ✗', false); return; }
@@ -815,13 +802,11 @@ async function loadFromSupabase() {
 }
 
 
-// ── SAVE EDITS — nunca apaga, só atualiza ou insere ──
+// ── SAVE EDITS ───────────────────────────────────────
 async function saveEdits() {
   showToast('Salvando…');
   for (let i = 0; i < items.length; i++) {
     const item = items[i];
-
-    // 1. Update iniciativa fields
     const { error: e1 } = await supa.from('iniciativas').update({
       nome:        item.name,
       responsavel: item.resp,
@@ -832,64 +817,27 @@ async function saveEdits() {
       fim:         item.end,
       progresso:   item.progress,
       ordem:       i,
-      ativo:       true,
     }).eq('id', item.id);
     if (e1) { console.error('save iniciativa', e1); continue; }
 
-    // 2. Soft-delete all existing list items for this iniciativa
-    await supa.from('lista_itens').update({ ativo: false }).eq('iniciativa_id', item.id);
-
-    // 3. Upsert each list item by dbId (update if exists, insert if new)
-    const allRows = [
+    await supa.from('lista_itens').delete().eq('iniciativa_id', item.id);
+    const rows = [
       ...item.actions.map((t, j) => ({
-        id:            item.actionsData?.[j]?.dbId ?? undefined,
         iniciativa_id: item.id, tipo: 'action', texto: t, ordem: j,
-        concluida:     item.actionsData?.[j]?.concluida ?? item.actionsDone?.[j] ?? false,
-        ativo:         true,
+        concluida: item.actionsData?.[j]?.concluida ?? item.actionsDone?.[j] ?? false,
       })),
-      ...item.kpis.map((t, j) => ({
-        id:            item.kpisData?.[j]?.dbId ?? undefined,
-        iniciativa_id: item.id, tipo: 'kpi', texto: t, ordem: j, ativo: true,
-      })),
-      ...item.risks.map((t, j) => ({
-        id:            item.risksData?.[j]?.dbId ?? undefined,
-        iniciativa_id: item.id, tipo: 'risk', texto: t, ordem: j, ativo: true,
-      })),
+      ...item.kpis.map((t, j)  => ({ iniciativa_id: item.id, tipo: 'kpi',  texto: t, ordem: j })),
+      ...item.risks.map((t, j) => ({ iniciativa_id: item.id, tipo: 'risk', texto: t, ordem: j })),
     ];
-
-    // Separate rows with known DB id (update) from new ones (insert)
-    const toUpdate = allRows.filter(r => r.id);
-    const toInsert = allRows.filter(r => !r.id).map(r => { const {id,...rest}=r; return rest; });
-
-    if (toUpdate.length > 0) {
-      await supa.from('lista_itens').upsert(toUpdate, { onConflict: 'id' });
+    if (rows.length > 0) {
+      const { data: inserted, error: e2 } = await supa.from('lista_itens').insert(rows).select();
+      if (e2) { console.error('save lista_itens', e2); continue; }
+      if (inserted) {
+        const newActions = inserted.filter(r => r.tipo === 'action').sort((a, b) => a.ordem - b.ordem);
+        item.actionsData = newActions.map(r => ({ dbId: r.id, texto: r.texto, concluida: r.concluida }));
+        item.actionsDone = item.actionsData.map(a => a.concluida);
+      }
     }
-    let insertedRows = [];
-    if (toInsert.length > 0) {
-      const { data } = await supa.from('lista_itens').insert(toInsert).select();
-      if (data) insertedRows = data;
-    }
-
-    // Refresh actionsData with up-to-date DB ids
-    const { data: freshActions } = await supa.from('lista_itens')
-      .select('id, texto, concluida, ordem')
-      .eq('iniciativa_id', item.id).eq('tipo', 'action').eq('ativo', true)
-      .order('ordem', { ascending: true });
-    if (freshActions) {
-      item.actionsData = freshActions.map(r => ({ dbId: r.id, texto: r.texto, concluida: r.concluida }));
-      item.actionsDone = item.actionsData.map(a => a.concluida);
-    }
-
-    // Refresh kpisData and risksData
-    const { data: freshKpis } = await supa.from('lista_itens')
-      .select('id, texto, ordem').eq('iniciativa_id', item.id).eq('tipo', 'kpi').eq('ativo', true)
-      .order('ordem', { ascending: true });
-    if (freshKpis) item.kpisData = freshKpis.map(r => ({ dbId: r.id, texto: r.texto }));
-
-    const { data: freshRisks } = await supa.from('lista_itens')
-      .select('id, texto, ordem').eq('iniciativa_id', item.id).eq('tipo', 'risk').eq('ativo', true)
-      .order('ordem', { ascending: true });
-    if (freshRisks) item.risksData = freshRisks.map(r => ({ dbId: r.id, texto: r.texto }));
   }
   showToast('Salvo ✓');
 }
