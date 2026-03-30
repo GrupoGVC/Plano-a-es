@@ -598,17 +598,22 @@ window.addEventListener('DOMContentLoaded', async () => {
 });
 
 async function loadVersion() {
-  const { data } = await supa
-    .from('versoes')
-    .select('versao, descricao, created_at')
-    .order('id', { ascending: false })
-    .limit(1)
-    .single();
-  if (data) {
-    const el = document.getElementById('footerVersion');
-    const date = new Date(data.created_at).toLocaleDateString('pt-BR');
-    el.textContent = 'v' + data.versao;
-    el.title = data.descricao + ' · ' + date;
+  try {
+    const { data, error } = await supa
+      .from('versoes')
+      .select('versao, descricao, created_at')
+      .order('id', { ascending: false })
+      .limit(1)
+      .single();
+    if (data && !error) {
+      const el = document.getElementById('footerVersion');
+      const date = new Date(data.created_at).toLocaleDateString('pt-BR');
+      el.textContent = 'v' + data.versao;
+      el.title = data.descricao + ' · ' + date;
+    }
+  } catch(e) {
+    // Mantém a versão hardcoded do HTML se o banco não estiver disponível
+    console.warn('Não foi possível carregar versão do banco:', e.message);
   }
 }
 </script>
