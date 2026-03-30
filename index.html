@@ -668,9 +668,40 @@ function updateColor(id,val){
   it.color=val;renderItems(activeFilter);
   setTimeout(()=>{document.getElementById(`detail-${id}`)?.classList.add('open');document.getElementById(`row-${id}`)?.classList.add('expanded');},10);
 }
-function removeItem(id){if(!confirm('Remover esta iniciativa?'))return;items=items.filter(i=>i.id!==id);renderItems(activeFilter);}
+// ── ADD ITEM TO DB ───────────────────────────────────
+async function addItemToDb(item, ordem) {
+  const { data, error } = await supa.from('iniciativas').insert({
+    nome: item.name, responsavel: item.resp, categoria: item.category,
+    status: item.status, cor: item.color, inicio: item.start, fim: item.end,
+    progresso: 0, ordem: ordem,
+  }).select().single();
+  if (error || !data) { console.error('addItemToDb', error); return null; }
+  const rows = [
+    ...item.actions.map((t,j) => ({ iniciativa_id: data.id, tipo:'action', texto:t, ordem:j, concluida:false })),
+    ...item.kpis.map((t,j)    => ({ iniciativa_id: data.id, tipo:'kpi',    texto:t, ordem:j })),
+    ...item.risks.map((t,j)   => ({ iniciativa_id: data.id, tipo:'risk',   texto:t, ordem:j })),
+  ];
+  if (rows.length > 0) {
+    const { data: inserted } = await supa.from('lista_itens').insert(rows).select();
+    if (inserted) {
+      const newActions = inserted.filter(r => r.tipo === 'action').sort((a,b) => a.ordem - b.ordem);
+      item.actionsData = newActions.map(r => ({ dbId: r.id, texto: r.texto, concluida: false }));
+      item.actionsDone = item.actionsData.map(() => false);
+    }
+  }
+  item.id = data.id;
+  return data.id;
+}
+
+async function removeItem(id){
+  if(!confirm('Remover esta iniciativa?'))return;
+  items=items.filter(i=>i.id!==id);
+  renderItems(activeFilter);
+  await deleteItemFromSupabase(id);
+  showToast('Iniciativa removida ✓');
+}
 function addNewItem(){
-  const n={id:nextId++,name:"Nova iniciativa",resp:"Responsável",category:activeFilter==='all'?'infra':activeFilter,status:"not-started",color:"blue",start:1,end:2,progress:0,actions:["Ação 1"],kpis:["KPI 1"],risks:["Risco 1"]};
+  const n={id:nextId++,name:"Nova iniciativa",resp:"Responsável",category:activeFilter==='all'?'infra':activeFilter,status:"not-started",color:"blue",start:1,end:2,progress:0,actions:["Ação 1"],actionsDone:[false],kpis:["KPI 1"],risks:["Risco 1"],};
   items.push(n);renderItems(activeFilter);
   setTimeout(()=>{document.getElementById(`detail-${n.id}`)?.classList.add('open');document.getElementById(`row-${n.id}`)?.classList.add('expanded');},10);
 }
@@ -712,7 +743,12 @@ async function toggleAction(itemId, actionIdx, el) {
   item.actionsDone[actionIdx] = !item.actionsDone[actionIdx];
   const isDone = item.actionsDone[actionIdx];
 
-  // Visual update immediately
+  // Update actionsData in sync
+  if (item.actionsData && item.actionsData[actionIdx]) {
+    item.actionsData[actionIdx].concluida = isDone;
+  }
+
+  // Visual update immediately (no re-render needed)
   el.classList.toggle('checked', isDone);
   const textEl = el.nextElementSibling;
   if (textEl) textEl.classList.toggle('done', isDone);
@@ -722,7 +758,7 @@ async function toggleAction(itemId, actionIdx, el) {
   const done  = item.actionsDone.filter(Boolean).length;
   item.progress = total > 0 ? Math.round((done / total) * 100) : 0;
 
-  // Update progress bar in row without full re-render
+  // Update progress bar without full re-render
   const block = document.getElementById(`row-${itemId}`)?.closest('.item-block');
   if (block) {
     const pc = progClass(item.progress);
@@ -735,19 +771,32 @@ async function toggleAction(itemId, actionIdx, el) {
   }
   updateSummary();
 
-  // Persist to Supabase: update concluida on the matching list_item row
-  const { data: liRows } = await supa
-    .from('lista_itens')
-    .select('id, ordem')
-    .eq('iniciativa_id', itemId)
-    .eq('tipo', 'action')
-    .order('ordem', { ascending: true });
-
-  if (liRows && liRows[actionIdx]) {
-    await supa.from('lista_itens')
+  // ── Persist to Supabase using stored DB id ──
+  const dbId = item.actionsData?.[actionIdx]?.dbId;
+  if (dbId) {
+    // Update by known DB id — fast and reliable
+    const { error } = await supa.from('lista_itens')
       .update({ concluida: isDone })
-      .eq('id', liRows[actionIdx].id);
-    // Supabase trigger will recalc progresso automatically
+      .eq('id', dbId);
+    if (error) { showToast('Erro ao salvar ✗', false); console.error(error); }
+    // DB trigger recalcula progresso automaticamente
+  } else {
+    // Fallback: busca por ordem caso actionsData ainda não tenha dbId (item novo)
+    const { data: liRows, error } = await supa
+      .from('lista_itens')
+      .select('id')
+      .eq('iniciativa_id', itemId)
+      .eq('tipo', 'action')
+      .order('ordem', { ascending: true });
+    if (!error && liRows && liRows[actionIdx]) {
+      // Store dbId for future use
+      if (!item.actionsData) item.actionsData = [];
+      if (!item.actionsData[actionIdx]) item.actionsData[actionIdx] = {};
+      item.actionsData[actionIdx].dbId = liRows[actionIdx].id;
+      await supa.from('lista_itens')
+        .update({ concluida: isDone })
+        .eq('id', liRows[actionIdx].id);
+    }
   }
 }
 
@@ -758,10 +807,10 @@ async function loadFromSupabase() {
     .select('*, lista_itens(*)')
     .order('ordem', { ascending: true });
 
-  if (error || !rows || rows.length === 0) {
-    // First load — push default items to Supabase
-    await saveAllToSupabase();
-    showToast('Dados salvos no Supabase ✓');
+  if (error) { showToast('Erro ao carregar ✗', false); return; }
+
+  if (!rows || rows.length === 0) {
+    showToast('Nenhum dado no banco', false);
     return;
   }
 
@@ -789,63 +838,13 @@ async function loadFromSupabase() {
   renderItems(activeFilter);
 }
 
-async function saveAllToSupabase() {
-  for (let i=0; i<items.length; i++) {
-    await upsertItem(items[i], i);
-  }
-}
-
-async function upsertItem(item, ordem) {
-  const { data, error } = await supa.from('iniciativas').upsert({
-    id: typeof item.id === 'number' && item.id < 100000 && item.id >= 10 ? undefined : item.id,
-    nome:        item.name,
-    responsavel: item.resp,
-    categoria:   item.category,
-    status:      item.status,
-    cor:         item.color,
-    inicio:      item.start,
-    fim:         item.end,
-    progresso:   item.progress,
-    ordem:       ordem ?? items.indexOf(item),
-  }, { onConflict: 'id' }).select().single();
-
-  if (error) { console.error('upsert error', error); return; }
-
-  const realId = data.id;
-  // update local id
-  item.id = realId;
-
-  // delete old list items and re-insert
-  await supa.from('lista_itens').delete().eq('iniciativa_id', realId);
-  const listRows = [
-    ...item.actions.map((t,i)=>({iniciativa_id:realId, tipo:'action', texto:t, ordem:i})),
-    ...item.kpis.map((t,i)=>({iniciativa_id:realId, tipo:'kpi',    texto:t, ordem:i})),
-    ...item.risks.map((t,i)=>({iniciativa_id:realId, tipo:'risk',   texto:t, ordem:i})),
-  ];
-  if (listRows.length) await supa.from('lista_itens').insert(listRows);
-}
-
-async function deleteItemFromSupabase(id) {
-  await supa.from('iniciativas').delete().eq('id', id);
-}
-
-// ── AUTO-SAVE on edit mode exit ──────────────────────
-const _origToggleEditMode = toggleEditMode;
-async function saveAndToggle() {
-  if (editMode) {
-    // about to exit edit mode — save everything
-    showToast('Salvando…');
-    for (let i=0; i<items.length; i++) {
-      await upsertItem(items[i], i);
-    }
-    showToast('Salvo no Supabase ✓');
-  }
-  _origToggleEditMode();
-}
 
 window.addEventListener('DOMContentLoaded', async ()=>{
   document.getElementById('logoImg').src = window._LOGO_SRC||'';
-  document.getElementById('editToggle').onclick = saveAndToggle;
+  document.getElementById('editToggle').onclick = async () => {
+    if (editMode) { await saveEdits(); }
+    toggleEditMode();
+  };
   renderItems('all');
   await loadFromSupabase();
 });
