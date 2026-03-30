@@ -545,21 +545,37 @@ async function saveEdits() {
     });
     if (e1) { console.error('save iniciativa', e1); continue; }
 
-    await api('delete-itens', { iniciativa_id: item.id });
-    const rows = [
+    // Atualiza apenas os campos de texto de cada item pelo dbId — nunca apaga
+    const updateRows = [
       ...item.actions.map((t, j) => ({
-        iniciativa_id: item.id, tipo: 'action', texto: t, ordem: j,
+        dbId: item.actionsData?.[j]?.dbId,
+        tipo: 'action', texto: t, ordem: j,
         concluida: item.actionsData?.[j]?.concluida ?? item.actionsDone?.[j] ?? false,
+        iniciativa_id: item.id,
       })),
-      ...item.kpis.map((t, j)  => ({ iniciativa_id: item.id, tipo: 'kpi',  texto: t, ordem: j })),
-      ...item.risks.map((t, j) => ({ iniciativa_id: item.id, tipo: 'risk', texto: t, ordem: j })),
+      ...item.kpis.map((t, j) => ({
+        dbId: item.kpisData?.[j]?.dbId,
+        tipo: 'kpi', texto: t, ordem: j, iniciativa_id: item.id,
+      })),
+      ...item.risks.map((t, j) => ({
+        dbId: item.risksData?.[j]?.dbId,
+        tipo: 'risk', texto: t, ordem: j, iniciativa_id: item.id,
+      })),
     ];
-    if (rows.length > 0) {
-      const { data: inserted, error: e2 } = await api('insert-itens', { rows });
-      if (e2) { console.error('save lista_itens', e2); continue; }
+    const toUpdate = updateRows.filter(r => r.dbId).map(({dbId, ...rest}) => ({id: dbId, ...rest}));
+    const toInsert = updateRows.filter(r => !r.dbId).map(({dbId, ...rest}) => rest);
+
+    if (toUpdate.length > 0) {
+      await api('upsert-itens', { rows: toUpdate });
+    }
+    if (toInsert.length > 0) {
+      const { data: inserted } = await api('insert-itens', { rows: toInsert });
       if (inserted) {
-        const newActions = inserted.filter(r => r.tipo === 'action').sort((a, b) => a.ordem - b.ordem);
-        item.actionsData = newActions.map(r => ({ dbId: r.id, texto: r.texto, concluida: r.concluida }));
+        const newActions = inserted.filter(r => r.tipo === 'action').sort((a,b) => a.ordem - b.ordem);
+        item.actionsData = [
+          ...(item.actionsData || []),
+          ...newActions.map(r => ({ dbId: r.id, texto: r.texto, concluida: r.concluida }))
+        ];
         item.actionsDone = item.actionsData.map(a => a.concluida);
       }
     }
