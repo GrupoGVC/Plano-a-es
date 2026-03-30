@@ -503,28 +503,33 @@ async function loadFromSupabase() {
     if (error) throw new Error(error.message);
     if (!rows || rows.length === 0) { showToast('Nenhum dado no banco', false); return; }
 
-  items = rows.map(r => {
-    const listItems = r.lista_itens || [];
-    const actionRows = listItems.filter(i=>i.tipo==='action').sort((a,b)=>a.ordem-b.ordem);
-    return {
-      id:          r.id,
-      name:        r.nome,
-      resp:        r.responsavel,
-      category:    r.categoria,
-      status:      r.status,
-      color:       r.cor,
-      start:       r.inicio,
-      end:         r.fim,
-      progress:    r.progresso,
-      actions:     actionRows.map(i=>i.texto),
-      actionsDone: actionRows.map(i=>!!i.concluida),
-      kpis:        listItems.filter(i=>i.tipo==='kpi').sort((a,b)=>a.ordem-b.ordem).map(i=>i.texto),
-      risks:       listItems.filter(i=>i.tipo==='risk').sort((a,b)=>a.ordem-b.ordem).map(i=>i.texto),
-    };
-  });
-  nextId = Math.max(...items.map(i=>i.id)) + 1;
-  showToast('Dados carregados ✓');
-  renderItems(activeFilter);
+    items = rows.map(r => {
+      const listItems = r.lista_itens || [];
+      const actionRows = listItems.filter(i=>i.tipo==='action').sort((a,b)=>a.ordem-b.ordem);
+      return {
+        id:          r.id,
+        name:        r.nome,
+        resp:        r.responsavel,
+        category:    r.categoria,
+        status:      r.status,
+        color:       r.cor,
+        start:       r.inicio,
+        end:         r.fim,
+        progress:    r.progresso,
+        actionsData: actionRows.map(a=>({ dbId:a.id, texto:a.texto, concluida:!!a.concluida })),
+        actions:     actionRows.map(i=>i.texto),
+        actionsDone: actionRows.map(i=>!!i.concluida),
+        kpis:        listItems.filter(i=>i.tipo==='kpi').sort((a,b)=>a.ordem-b.ordem).map(i=>i.texto),
+        risks:       listItems.filter(i=>i.tipo==='risk').sort((a,b)=>a.ordem-b.ordem).map(i=>i.texto),
+      };
+    });
+    nextId = Math.max(...items.map(i=>i.id)) + 1;
+    showToast('Dados carregados ✓');
+    renderItems(activeFilter);
+  } catch(e) {
+    showToast('Erro ao carregar ✗', false);
+    console.error('loadFromSupabase error:', e);
+  }
 }
 
 
