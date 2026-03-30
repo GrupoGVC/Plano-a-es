@@ -422,7 +422,7 @@ function removeListItem(btn){
 // ── SUPABASE CONFIG ─────────────────────────────────
 const SUPA_URL = 'https://lqbmjmqrhcokimdtekyc.supabase.co';
 const SUPA_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxxYm1qbXFyaGNva2ltZHRla3ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ4NzE5MjYsImV4cCI6MjA5MDQ0NzkyNn0.iZicQ0AzJW2zX9Q-UaL0HviFfEefeBH3mGno1WsT3VA';
-const supa = supabase.createClient(SUPA_URL, SUPA_KEY);
+let supa; // initialized in DOMContentLoaded after SDK loads
 
 function showToast(msg, ok=true) {
   const t = document.getElementById('toast');
@@ -579,6 +579,9 @@ async function saveEdits() {
 }
 
 window.addEventListener('DOMContentLoaded', async () => {
+  // Initialize Supabase client here — ensures SDK is loaded first
+  supa = supabase.createClient(SUPA_URL, SUPA_KEY);
+
   document.getElementById('logoImg').src = window._LOGO_SRC || '';
 
   document.getElementById('editToggle').addEventListener('click', async () => {
